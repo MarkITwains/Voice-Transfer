@@ -67,7 +67,6 @@ jobs:
       QA_TEST_MODE: "1"
       QA_BASE_URL: http://127.0.0.1:7200
       no_proxy: "127.0.0.1,localhost,::1"
-      NO_PROXY: "127.0.0.1,localhost,::1"
 
     steps:
       - name: Checkout
