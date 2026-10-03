@@ -1,0 +1,48 @@
+%% 迭代 v3：验证码 + 安全强化 —— 登录/登出主流程
+sequenceDiagram
+    participant C as 浏览器
+    participant P as proxy.ts
+    participant L as login route
+    participant CAP as captcha.ts
+    participant UR as userRepo
+    participant SS as sessionStore
+    participant AT as authToken
+    participant DB as MySQL
+
+    C->>P: POST /api/auth/login {username,password,captchaId?,captchaCode?}
+    P->>P: CSRF：Origin 缺失→放行；异源→403
+    P->>L: next()
+    L->>L: IP 限速 hit(login:ip:un, 5, 15min) 超限→429
+    L->>UR: getLoginLockState(username)
+    UR->>DB: SELECT failed_login_count, locked_until FROM users
+    alt locked_until > NOW
+        L-->>C: 429 {lockedSeconds}（不暴露账号存在性差异）
+    else
+        L->>L: requireCaptcha = failed_login_count >= 2
+        alt requireCaptcha
+            L->>CAP: verifyCaptcha(captchaId, captchaCode)
+            Note over CAP: 一次性消费：先 pop 再比对<br/>失败也作废，须换新码
+            CAP-->>L: false → 401 {requireCaptcha:true}（不计数）
+        end
+        L->>UR: getPasswordHash + verifyPassword
+        alt 密码错误
+            L->>UR: incrementFailedLogin(uid)
+            UR->>DB: UPDATE failed_login_count+1；达 5 次→locked_until=NOW+15min 且计数归零
+            L-->>C: 401 {requireCaptcha: true}
+        else 成功
+            L->>UR: resetLoginState(uid)（count=0, locked_until=NULL）
+            L->>SS: purgeExpired() + insertSession(jti, uid, exp)
+            SS->>DB: INSERT INTO sessions
+            L->>AT: signToken({uid,un,role,ver}) → {token, jti}
+            L-->>C: 200 + Set-Cookie ma_session=v2...
+        end
+    end
+
+    C->>P: POST /api/auth/logout（拷贝的旧 Cookie）
+    P->>P: 无状态验签通过（proxy 不查 DB）
+    P->>L: next()
+    L->>AT: verifyToken → payload.jti
+    L->>SS: deleteSession(jti)
+    SS->>DB: DELETE FROM sessions WHERE jti=?
+    L-->>C: 200 + 清 Cookie
+    Note over C,DB: 之后旧 Cookie 再访 requireUser：<br/>users JOIN sessions 无行 → 401（吊销即时生效）

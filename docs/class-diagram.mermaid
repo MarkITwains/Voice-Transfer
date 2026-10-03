@@ -1,0 +1,81 @@
+%% 迭代 v3：验证码 + 安全强化 —— 核心类图
+classDiagram
+    class CaptchaLib["app/lib/captcha.ts"] {
+        -store: Map~string, CaptchaEntry~
+        -MAX_ENTRIES: number = 2000
+        -TTL_MS: number = 300_000
+        -CHARSET: string = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
+        +issueCaptcha() CaptchaIssue
+        +verifyCaptcha(id: string, input: string) boolean
+        +isCaptchaTestMode() boolean
+    }
+    class CaptchaEntry {
+        +code: string
+        +expiresAt: number
+    }
+    class CaptchaIssue {
+        +id: string
+        +svg: string
+        +expiresIn: number
+        +debugCode?: string
+    }
+
+    class SessionStore["app/lib/sessionStore.ts"] {
+        +insertSession(jti: string, userId: number, expiresAt: Date) Promise~void~
+        +deleteSession(jti: string) Promise~void~
+        +deleteSessionsByUser(userId: number) Promise~void~
+        +purgeExpired() Promise~void~
+    }
+
+    class AuthToken["app/lib/authToken.ts (改造)"] {
+        +SESSION_COOKIE: "ma_session"
+        +SESSION_TTL_SECONDS: 604800
+        +signToken(base) TokenWithJti
+        +verifyToken(token) SessionPayload | null
+    }
+    class SessionPayload {
+        +uid: number
+        +un: string
+        +role: string
+        +ver: number
+        +jti: string
+        +iat: number
+        +exp: number
+    }
+
+    class Auth["app/lib/auth.ts (改造)"] {
+        +requireUser(req) SessionUser | null
+        +requireAdmin(req) SessionUser | null
+        +getServerUser() SessionUser | null
+        -resolveUser(token) SessionUser | null
+    }
+
+    class UserRepo["app/lib/userRepo.ts (扩展)"] {
+        +registerUser(username, password) RegisterResult
+        +changePassword(userId, newPassword) UserRecord | null
+        +getLoginLockState(username) LockState | null
+        +incrementFailedLogin(userId, now) void
+        +resetLoginState(userId) void
+    }
+    class LockState {
+        +id: number
+        +failedLoginCount: number
+        +lockedUntil: Date | null
+        +tokenVersion: number
+    }
+
+    class CaptchaRoute["GET /api/auth/captcha"] {
+        +GET(req) JSON
+    }
+    class Proxy["proxy.ts (改造)"] {
+        +proxy(request) NextResponse
+        -csrfCheck(request) NextResponse | null
+    }
+
+    CaptchaLib o-- CaptchaEntry : 内存 Map 持有
+    AuthToken ..> SessionPayload : 签发/校验
+    Auth ..> AuthToken : verifyToken
+    Auth ..> SessionStore : JOIN sessions 核对
+    CaptchaRoute ..> CaptchaLib : issueCaptcha
+    UserRepo ..> SessionStore : 改密删会话
+    Proxy ..> AuthToken : 无状态验签

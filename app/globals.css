@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+/*
+ * 浅色人文风：页面为宣纸质感（stone 色系），不随系统深色模式反转，
+ * 否则页面内硬编码的浅色块会与深色 body 相互冲突。
+ */
+html {
+  color-scheme: light;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+/* 细滚动条：与整体克制的视觉语言保持一致 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #d6d3d1 transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #d6d3d1;
+  border-radius: 0;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #a8a29e;
+}
+
+/*
+ * 键盘导航焦点环：组件层大量使用 focus:outline-none，
+ * Tab 键导航时若无此规则将完全看不到焦点位置。
+ * 仅 :focus-visible（键盘导航）时显现，鼠标点击不受影响。
+ */
+*:focus-visible {
+  outline: 2px solid #44403c;
+  outline-offset: 1px;
+}
