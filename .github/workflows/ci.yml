@@ -114,21 +114,34 @@ jobs:
           done
           echo "MySQL 启动超时"; exit 1
 
-      - name: 启动开发服务
+      # 注意：GitHub Actions 每个 step 是独立 shell，后台进程不会跨 step 存活，
+      # 因此「起服务 + 等就绪 + 跑测试 + 收尾」必须在同一个 step 内完成。
+      - name: 启动开发服务并执行回归测试
         run: |
+          set -u
           npm run dev > scripts/_ci_devserver.log 2>&1 &
+          DEV_PID=$!
+          # 无论成败都回收 dev server 进程，避免 job 挂起
+          trap 'kill "$DEV_PID" 2>/dev/null || true' EXIT
+
+          ready=0
           for i in $(seq 1 60); do
             if curl -sf http://127.0.0.1:7200/api/health > /dev/null; then
-              echo "dev server 已就绪"; exit 0
+              echo "dev server 已就绪（第 $i 次探测）"
+              ready=1
+              break
             fi
-            echo "等待 dev server... ($i/60)"; sleep 2
+            echo "等待 dev server... ($i/60)"
+            sleep 2
           done
-          echo "dev server 启动超时，日志如下："
-          cat scripts/_ci_devserver.log
-          exit 1
 
-      - name: 执行回归测试
-        run: node scripts/test/run-all.mjs
+          if [ "$ready" -ne 1 ]; then
+            echo "::error::dev server 启动超时，日志如下："
+            cat scripts/_ci_devserver.log
+            exit 1
+          fi
+
+          node scripts/test/run-all.mjs
 
       - name: 失败时上传服务日志
         if: failure()

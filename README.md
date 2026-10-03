@@ -187,7 +187,11 @@ scripts/db/  scripts/test/    建库脚本、回归测试用例
 node scripts/test/run-all.mjs
 ```
 
-覆盖 7 组共 **83** 个用例（C27 + D5 + A10 + B8 + E13 + F11 + G9），按 **C（认证）→ D（认证深水区）→ A（会议 CRUD）→ B（设置同步）→ E（验证码）→ F（安全）→ G（QA 验收）** 顺序执行。测试用例自注入并自清理测试密钥，不依赖库内预置状态；如需指向其他地址，可设 `QA_BASE_URL` 环境变量。D 组含破坏性编排用例，按 QA 报告中的手工步骤执行。
+覆盖 7 组共 **83** 个用例定义（C27 + D5 + A10 + B8 + E13 + F11 + G9），按 **C（认证）→ D（认证深水区）→ A（会议 CRUD）→ B（设置同步）→ E（验证码）→ F（安全）→ G（QA 验收）** 顺序执行。
+
+> 已有管理员的存量库上实跑 **82** 个（C 组的「C0-1 全新库：首个注册用户自动成为管理员」仅在空库首次运行时触发）。
+
+测试用例自注入并自清理测试密钥，不依赖库内预置状态；如需指向其他地址，可设 `QA_BASE_URL` 环境变量。D 组含破坏性编排用例，按 QA 报告中的手工步骤执行。
 
 CI 中这条流水线会自动跑一遍（见第十一节）。
 
@@ -200,11 +204,11 @@ CI 中这条流水线会自动跑一遍（见第十一节）。
 | 阶段 | 内容 | 依赖 |
 |---|---|---|
 | **1. 静态检查与构建** | `npm ci` → `tsc --noEmit` → `npm run lint` → `npm run build` | 无（无需数据库） |
-| **2. 集成回归** | 拉起 `mysql:8.0` service → 建库 → 启动 dev server → 跑全部 **83** 个用例 | 需阶段 1 通过 |
+| **2. 集成回归** | 拉起 `mysql:8.0` service → 建库 → 启动 dev server → 执行全部用例 | 需阶段 1 通过 |
 
 > 阶段 1 之所以不依赖数据库：应用的建表逻辑 `ensureDatabase()` 是**懒执行**的，只在首次 API 调用时触发，因此 `next build` 全程不连库。
 
-集成阶段通过环境变量注入 `DATABASE_URL` / `AUTH_SECRET` / `QA_TEST_MODE=1`（`.env*` 已被 gitignore，凭证不会入库）。测试失败时会上传 dev server 日志供排查。
+集成阶段通过环境变量注入 `DATABASE_URL` / `AUTH_SECRET` / `QA_TEST_MODE=1`（`.env*` 已被 gitignore，凭证不会入库）。**dev server 与回归测试在同一 step 内启动并执行** —— GitHub Actions 每个 step 是独立 shell，后台进程不会跨 step 存活。测试失败时会上传 dev server 日志供排查。
 
 ---
 
