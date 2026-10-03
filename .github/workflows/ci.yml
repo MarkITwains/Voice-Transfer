@@ -125,12 +125,26 @@ jobs:
       - name: Show integration diagnostics
         if: always()
         run: |
-          echo "===== _ci_integration.log ====="
+          echo "::group::_ci_integration.log"
           cat scripts/_ci_integration.log 2>/dev/null || echo "(missing)"
-          echo "===== _ci_devserver.log ====="
+          echo "::endgroup::"
+          echo "::group::_ci_devserver.log"
           cat scripts/_ci_devserver.log 2>/dev/null || echo "(missing)"
-          echo "===== port 7200 after ====="
+          echo "::endgroup::"
+          echo "::group::port 7200 after"
           (ss -ltnp 2>/dev/null | grep 7200 || echo "(not listening)")
+          echo "::endgroup::"
+          # 把关键错误行提升为注解，便于在 Actions 概览页直接看到
+          if [ -f scripts/_ci_integration.log ]; then
+            grep -E "error|Error|ECONNREFUSED|退出|failed" scripts/_ci_integration.log | head -10 | while read -r line; do
+              echo "::error::$line"
+            done
+          fi
+          if [ -f scripts/_ci_devserver.log ]; then
+            grep -E "error|Error|EADDRINUSE|Cannot find" scripts/_ci_devserver.log | head -10 | while read -r line; do
+              echo "::error::dev: $line"
+            done
+          fi
 
       - name: Upload diagnostics on failure
         if: failure()
