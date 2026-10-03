@@ -149,7 +149,7 @@ jobs:
           fi
 
       - name: Push debug log to ci-debug-log branch
-        if: always()
+        if: failure()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
