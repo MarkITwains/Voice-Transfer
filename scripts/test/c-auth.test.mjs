@@ -277,7 +277,7 @@ try {
     const stamp = Date.now().toString(36);
     const pwdUser = `qa_pwd_${stamp}`;
     let oldCookie = null;
-    const pwdRes = await registerOrLogin(pwdUser, "Passw0rd2026");
+    await registerOrLogin(pwdUser, "Passw0rd2026");
     await testCase("C11-1 改密准备：登录并保存改密前的旧会话 Cookie", async () => {
         const login = await loginAs(pwdUser, "Passw0rd2026");
         assert.equal(login.status, 200, `改密账号登录失败：${login.text.slice(0, 150)}`);

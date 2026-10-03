@@ -1,5 +1,10 @@
 # 言简 · 会议纪要
 
+[![CI](https://github.com/MarkITwains/Voice-Transfer/actions/workflows/ci.yml/badge.svg)](https://github.com/MarkITwains/Voice-Transfer/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Next.js](https://img.shields.io/badge/Next.js-16-black.svg)](https://nextjs.org/)
+[![MySQL](https://img.shields.io/badge/MySQL-8.0%2B-4479A1.svg)](https://www.mysql.com/)
+
 > 去芜存菁，静心备忘。
 >
 > 把一段会议速记、一份录音，梳理成「核心决议 · 待办分工 · 讨论议题 · 潜在风险」四段式纪要，
@@ -38,7 +43,7 @@
 
 ## 三、环境要求
 
-- **Node.js**：20 及以上（开发验证使用 22.x）
+- **Node.js**：20 及以上（开发与 CI 均使用 22.x）
 - **MySQL**：8.0 及以上，本机常驻实例即可（当前验证环境为 9.7.2，`127.0.0.1:3306`）
 - **浏览器**：Chrome / Edge 等现代浏览器（现场收音需要麦克风权限）
 
@@ -86,6 +91,7 @@ npm run dev
 | `COOKIE_SECURE` | — | 置 `1` 时 Cookie 带 `Secure` 标记，**仅在 HTTPS 部署时开启**，本地 http 开启会导致登录态失效 |
 | `TRUSTED_ORIGINS` | — | 跨站请求（CSRF）校验的额外可信源，逗号分隔，例如 `https://demo.example.com`。缺省为空则不额外放行 |
 | `QA_TEST_MODE` | — | 置 `1` 时验证码接口在响应中附带明文 `debugCode`，**仅供开发/QA 环境跑自动化测试**。生产环境（`next start`，`NODE_ENV=production`）双条件硬门，即使误配也不会生效 |
+| `QA_BASE_URL` | — | 回归测试脚本指向的服务地址，默认 `http://127.0.0.1:7200` |
 
 `.env.example` 里有可直接复制的模板。
 
@@ -101,6 +107,7 @@ npm run dev
 | `npm run build` | 生产构建 |
 | `npm run start` | 启动生产服务，端口 7200（需先 `build`） |
 | `npm run lint` | ESLint 检查 |
+| `npx tsc --noEmit` | TypeScript 类型检查（CI 使用） |
 | `node scripts/db/create-mysql-database.mjs` | 幂等建库 + 连通性验证 |
 | `node scripts/test/run-all.mjs` | 全量回归测试（需 dev 服务与 MySQL 均在运行） |
 
@@ -114,19 +121,21 @@ npm run dev
 app/
   page.tsx                    首页（纪要录入工作台）
   login/  register/           登录 / 注册页
+  help/                       公开帮助页
   result/[roomId]/            纪要结果页（动态路由）
   api/                        接口层（见下方「接口一览」）
   components/                 前端组件（录入、结果、设置、问答、导出等）
   lib/                        数据与服务层
     db.ts / bootstrap.ts       连接池、启动建表与幂等迁移
     auth.ts / authToken.ts     认证鉴权、会话令牌
-    userRepo / meetingRepo / settingsRepo    数据访问
     captcha.ts / rateLimit.ts  验证码、内存限速
+    userRepo / meetingRepo / settingsRepo / sessionStore   数据访问
     crypto.ts / serverSettings 密钥 AES-256-GCM 加解密
 proxy.ts                      全站访问闸门（未登录重定向 + CSRF 校验）
 data/  .data/                 会话签名密钥、加密主密钥、历史 JSON 备份
 docs/                         设计与使用文档
 scripts/db/  scripts/test/    建库脚本、回归测试用例
+.github/workflows/ci.yml      持续集成流水线
 ```
 
 ---
@@ -161,13 +170,13 @@ scripts/db/  scripts/test/    建库脚本、回归测试用例
 | `GET`/`PUT` | `/api/settings` | 读取脱敏配置 / 保存配置（密钥留空 = 保留旧值） |
 | `POST` | `/api/models` | 用刚填的密钥拉取可用模型列表 |
 | `POST` | `/api/test-key` | 测试密钥连通性 |
-| `POST` | `/api/transcribe` | 音频转写（`multipart/form-data`，单文件 ≤ 50MB） |
+| `POST` | `/api/transcribe` | 音频转写（`multipart/form-data`，单文件 ≤ 50MB，单次超时 10 分钟） |
 | `POST` | `/api/summarize` | 提炼生成会议纪要（`rawText` 至少 5 字，`style` 四选一） |
-| `GET` | `/api/meetings` | 会议列表 / 单篇详情（`limit` 默认 30） |
+| `GET` | `/api/meetings` | 会议列表 / 单篇详情（`limit` 默认 30，上限 200） |
 | `PATCH` | `/api/meetings` | 修改标题、同步待办勾选状态 |
 | `DELETE` | `/api/meetings?id=` | 删除某篇纪要 |
 | `POST` | `/api/chat` | 纪要问答助手 |
-| `GET` | `/api/admin/users` | 用户列表（仅管理员） |
+| `GET` | `/api/admin/users` | 用户列表（仅管理员，只读） |
 
 ---
 
@@ -178,11 +187,28 @@ scripts/db/  scripts/test/    建库脚本、回归测试用例
 node scripts/test/run-all.mjs
 ```
 
-覆盖 7 组共 **82** 个用例（C26 + D5 + A10 + B8 + E13 + F11 + G9），按 **C（认证）→ D（认证深水区）→ A（会议 CRUD）→ B（设置同步）→ E（验证码）→ F（安全）→ G（QA 判定）** 顺序执行。测试用例自注入并自清理测试密钥，不依赖库内预置状态；如需指向其他地址，可设 `QA_BASE_URL` 环境变量。
+覆盖 7 组共 **83** 个用例（C27 + D5 + A10 + B8 + E13 + F11 + G9），按 **C（认证）→ D（认证深水区）→ A（会议 CRUD）→ B（设置同步）→ E（验证码）→ F（安全）→ G（QA 验收）** 顺序执行。测试用例自注入并自清理测试密钥，不依赖库内预置状态；如需指向其他地址，可设 `QA_BASE_URL` 环境变量。D 组含破坏性编排用例，按 QA 报告中的手工步骤执行。
+
+CI 中这条流水线会自动跑一遍（见第十一节）。
 
 ---
 
-## 十一、常见问题
+## 十一、持续集成
+
+仓库内置 GitHub Actions 流水线 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)，在 **推送到 `master`** 与 **针对 `master` 的 PR** 时自动触发，分两个阶段：
+
+| 阶段 | 内容 | 依赖 |
+|---|---|---|
+| **1. 静态检查与构建** | `npm ci` → `tsc --noEmit` → `npm run lint` → `npm run build` | 无（无需数据库） |
+| **2. 集成回归** | 拉起 `mysql:8.0` service → 建库 → 启动 dev server → 跑全部 **83** 个用例 | 需阶段 1 通过 |
+
+> 阶段 1 之所以不依赖数据库：应用的建表逻辑 `ensureDatabase()` 是**懒执行**的，只在首次 API 调用时触发，因此 `next build` 全程不连库。
+
+集成阶段通过环境变量注入 `DATABASE_URL` / `AUTH_SECRET` / `QA_TEST_MODE=1`（`.env*` 已被 gitignore，凭证不会入库）。测试失败时会上传 dev server 日志供排查。
+
+---
+
+## 十二、常见问题
 
 | 现象 | 原因与处理 |
 |---|---|
@@ -197,7 +223,7 @@ node scripts/test/run-all.mjs
 
 ---
 
-## 十二、文档索引
+## 十三、文档索引
 
 | 文档 | 面向 | 内容 |
 |---|---|---|
@@ -208,3 +234,11 @@ node scripts/test/run-all.mjs
 | [docs/system_design-数据库化-2026-09-30.md](docs/system_design-数据库化-2026-09-30.md) | 开发者 | 数据持久化与配置同步 |
 | [docs/mysql-切换说明-2026-09-30.md](docs/mysql-切换说明-2026-09-30.md) | 运维 | 数据库切换记录与初始化步骤 |
 | [docs/prd-*.md](docs/) | 产品 | 各迭代的需求说明 |
+
+---
+
+## 十四、开源协议
+
+本项目采用 [MIT License](LICENSE) 开源，Copyright (c) 2026 言简 · 会议纪要 (Voice-Transfer)。
+
+你可以自由地使用、修改、分发本软件（包括商业用途），只需保留原始版权声明与许可声明。软件按「原样」提供，不附带任何形式的担保。

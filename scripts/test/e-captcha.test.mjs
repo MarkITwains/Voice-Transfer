@@ -200,7 +200,7 @@ try {
         await dbQuery(
             `DELETE FROM user_settings WHERE user_id IN (SELECT id FROM users WHERE username LIKE 'qa_cap_%')`
         );
-        const del = await dbQuery(`DELETE FROM users WHERE username LIKE 'qa_cap_%'`);
+        await dbQuery(`DELETE FROM users WHERE username LIKE 'qa_cap_%'`);
         console.log(`清理 qa_cap_* 测试用户完成`);
     } catch (e) {
         console.log(`清理 qa_cap_* 失败，请人工检查: ${e.message}`);

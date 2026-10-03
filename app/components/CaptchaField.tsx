@@ -27,14 +27,17 @@ export default function CaptchaField({
     refreshSignal,
 }: CaptchaFieldProps) {
     const [svg, setSvg] = useState("");
-    const [loading, setLoading] = useState(false);
+    // 挂载即发起首次请求，loading 初值为 true，避免在 effect 内同步 setState
+    const [loading, setLoading] = useState(true);
     const [nonce, setNonce] = useState(0);
 
-    const refresh = useCallback(() => setNonce((n) => n + 1), []);
+    const refresh = useCallback(() => {
+        setLoading(true); // 用户主动刷新，属事件回调而非 effect 同步调用
+        setNonce((n) => n + 1);
+    }, []);
 
     useEffect(() => {
         let cancelled = false;
-        setLoading(true);
         fetch("/api/auth/captcha")
             .then((r) => r.json())
             .then((d: { captchaId?: string; svg?: string }) => {

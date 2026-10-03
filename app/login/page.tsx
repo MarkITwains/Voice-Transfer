@@ -26,10 +26,13 @@ export default function LoginPage() {
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(false);
     const lockTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+    const locked = lockRemaining > 0;
 
-    // 锁定倒计时：每秒递减，归零自动清除提示条
+    // 锁定倒计时：每秒递减，归零自动清除提示条。
+    // 倒计时读写全部走函数式更新，故 effect 只依赖布尔量 locked，
+    // 不会因每秒 setState 而反复重建 interval。
     useEffect(() => {
-        if (lockRemaining <= 0) {
+        if (!locked) {
             if (lockTimer.current) {
                 clearInterval(lockTimer.current);
                 lockTimer.current = null;
@@ -45,7 +48,7 @@ export default function LoginPage() {
                 lockTimer.current = null;
             }
         };
-    }, [lockRemaining > 0]);
+    }, [locked]);
 
     const refreshCaptcha = () => setCaptchaNonce((n) => n + 1);
 

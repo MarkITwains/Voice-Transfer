@@ -12,6 +12,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // 本地验证产物与运行数据（内含浏览器缓存/密钥，非源码，不应被扫描）
+    "screenshots/**",
+    "data/**",
+    ".data/**",
+    "scripts/**/*.log",
   ]),
 ]);
 

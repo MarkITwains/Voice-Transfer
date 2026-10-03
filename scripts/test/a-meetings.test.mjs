@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import {
     httpGet, httpPatch, httpDelete, dbQuery, closePool,
-    testCase, summary, startMockLlm, createMeetingViaSummarize, safeDeleteMeeting,
+    testCase, summary, startMockLlm, createMeetingViaSummarize,
     registerOrLogin, extractSessionCookie, setForwardedIp,
 } from "./helpers.mjs";
 

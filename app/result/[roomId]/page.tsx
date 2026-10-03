@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getServerUser } from "@/app/lib/auth";
 import { getMeeting } from "@/app/lib/meetingRepo";

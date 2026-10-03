@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 /** GET /api/health —— SELECT 1 探活，报告 DB 状态 */
 export async function GET() {
     try {
-        const ok = await pingDb();
+        await pingDb();
         return NextResponse.json({
             status: "ok",
             database: "up",

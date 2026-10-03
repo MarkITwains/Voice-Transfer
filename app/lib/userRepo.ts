@@ -10,7 +10,7 @@ import bcrypt from "bcryptjs";
 import { getPool, query } from "./db";
 import { ensureDatabase } from "./bootstrap";
 import { deleteSessionsByUser } from "./sessionStore";
-import type { RowDataPacket, ResultSetHeader } from "mysql2/promise";
+import type { RowDataPacket } from "mysql2/promise";
 
 const BCRYPT_ROUNDS = 10;
 

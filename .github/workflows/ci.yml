@@ -1,0 +1,139 @@
+name: CI
+
+# 触发：推送到 master，以及针对 master 的 PR
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+# 同一分支的重复触发自动取消上一次未完成的运行
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ───────────────────────────────────────────────────────────
+  # Job 1：静态检查与生产构建（不依赖数据库，快速失败）
+  # ───────────────────────────────────────────────────────────
+  build:
+    name: Lint · Typecheck · Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 类型检查
+        run: npx tsc --noEmit
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: 生产构建
+        env:
+          # ensureDatabase() 为 lazy 执行，构建期不连库；
+          # 此处提供占位连接串，避免任何预渲染路径意外触碰连接池。
+          DATABASE_URL: mysql://ci:ci@127.0.0.1:3306/meeting_ai
+          AUTH_SECRET: ci-build-placeholder-secret
+        run: npm run build
+
+  # ───────────────────────────────────────────────────────────
+  # Job 2：集成回归（真实 MySQL + 真实 dev 服务，跑全部 83 个用例）
+  # 仅在 Job 1 通过后执行
+  # ───────────────────────────────────────────────────────────
+  integration:
+    name: Integration (83 cases)
+    runs-on: ubuntu-latest
+    needs: build
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: meeting_ai
+          MYSQL_USER: transfer
+          MYSQL_PASSWORD: ci_password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    env:
+      DATABASE_URL: mysql://transfer:ci_password@127.0.0.1:3306/meeting_ai
+      AUTH_SECRET: ci-integration-secret-key
+      # E 组用例依赖验证码接口回传 debugCode；仅开发/QA 环境生效
+      QA_TEST_MODE: "1"
+      QA_BASE_URL: http://127.0.0.1:7200
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 生成 .env.local
+        run: |
+          cat > .env.local <<'EOF'
+          DATABASE_URL=mysql://transfer:ci_password@127.0.0.1:3306/meeting_ai
+          AUTH_SECRET=ci-integration-secret-key
+          QA_TEST_MODE=1
+          QA_BASE_URL=http://127.0.0.1:7200
+          EOF
+
+      - name: 建库并验证连通
+        run: node scripts/db/create-mysql-database.mjs
+
+      - name: 等待 MySQL 就绪
+        run: |
+          for i in $(seq 1 30); do
+            if mysqladmin ping -h127.0.0.1 -P3306 -utransfer -pci_password --silent 2>/dev/null; then
+              echo "MySQL 已就绪"; exit 0
+            fi
+            echo "等待 MySQL... ($i/30)"; sleep 2
+          done
+          echo "MySQL 启动超时"; exit 1
+
+      - name: 启动开发服务
+        run: |
+          npm run dev > scripts/_ci_devserver.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:7200/api/health > /dev/null; then
+              echo "dev server 已就绪"; exit 0
+            fi
+            echo "等待 dev server... ($i/60)"; sleep 2
+          done
+          echo "dev server 启动超时，日志如下："
+          cat scripts/_ci_devserver.log
+          exit 1
+
+      - name: 执行回归测试
+        run: node scripts/test/run-all.mjs
+
+      - name: 失败时上传服务日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-server-log
+          path: scripts/_ci_devserver.log
+          if-no-files-found: ignore
