@@ -154,9 +154,24 @@ if (!ready || devExited) {
 }
 log("dev server 已就绪");
 
-// 3) 跑全量回归
+// 3) 跑全量回归（捕获输出：既透传到 stdout，也写进 selfStream 日志，便于事后取证）
 log("===== 开始执行回归测试 =====");
-const testCode = await runProcess(node, [path.join(root, "scripts/test/run-all.mjs")]);
+const testCode = await new Promise((resolve) => {
+    const child = spawn(node, [path.join(root, "scripts/test/run-all.mjs")], {
+        cwd: root,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: cleanEnv(),
+    });
+    child.stdout.on("data", (chunk) => {
+        process.stdout.write(chunk);
+        selfStream.write(chunk);
+    });
+    child.stderr.on("data", (chunk) => {
+        process.stderr.write(chunk);
+        selfStream.write(chunk);
+    });
+    child.on("exit", (code) => resolve(code ?? 1));
+});
 log(`REGRESS_EXIT=${testCode}`);
 
 // 4) 收尾
@@ -169,6 +184,9 @@ try {
 }
 
 shutdown();
-// 给进程一点时间优雅退出
+// 给进程一点时间优雅退出，并确保日志流完整落盘
 await new Promise((r) => setTimeout(r, 500));
+await new Promise((r) => {
+    selfStream.end(r);
+});
 process.exit(testCode);
