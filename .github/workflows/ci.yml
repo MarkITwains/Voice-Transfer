@@ -114,58 +114,11 @@ jobs:
           done
           echo "MySQL 启动超时"; exit 1
 
-      # 注意：GitHub Actions 每个 step 是独立 shell，后台进程不会跨 step 存活，
-      # 因此「起服务 + 等就绪 + 跑测试 + 收尾」必须在同一个 step 内完成。
+      # 注意：GitHub Actions 每个 step 是独立 shell，后台进程不会跨 step 存活。
+      # 故用单个 Node 脚本在**同一进程内**完成「起服务 → 等就绪 → 跑测试 → 回收」，
+      # 既跨平台可靠，也可在本地以同一命令复现。
       - name: 启动开发服务并执行回归测试
-        run: |
-          # 关闭 errexit：kill/curl 等探活命令返回非零不应中断整个脚本
-          set +e
-          set -u
-
-          # 显式绑定 127.0.0.1（IPv4）：
-          # - 避开 Ubuntu 上 localhost 解析到 ::1 而探活走 IPv4 的不一致
-          # - 直接调用 next，避免 npm 这层对信号的转发损耗
-          npx next dev -H 127.0.0.1 -p 7200 > scripts/_ci_devserver.log 2>&1 &
-          DEV_PID=$!
-          # 无论成败都回收 dev server 进程，避免 job 挂起
-          trap 'kill "$DEV_PID" 2>/dev/null || true' EXIT
-
-          ready=0
-          for i in $(seq 1 90); do
-            if curl -sf http://127.0.0.1:7200/api/health > /dev/null; then
-              echo "dev server 已就绪（第 $i 次探测）"
-              ready=1
-              break
-            fi
-            # dev server 进程若已退出，无需继续等待
-            if ! kill -0 "$DEV_PID" 2>/dev/null; then
-              echo "::error::dev server 进程已退出，日志如下："
-              cat scripts/_ci_devserver.log
-              exit 1
-            fi
-            echo "等待 dev server... ($i/90)"
-            sleep 2
-          done
-
-          # 无论就绪与否都打印日志尾部，便于诊断
-          echo "===== dev server 日志（尾部 40 行）====="
-          tail -40 scripts/_ci_devserver.log || true
-          echo "========================================="
-
-          if [ "$ready" -ne 1 ]; then
-            echo "::error::dev server 启动超时（180s）"
-            exit 1
-          fi
-
-          echo "===== 开始执行回归测试 ====="
-          node scripts/test/run-all.mjs
-          TEST_EXIT=$?
-          echo "REGRESS_EXIT=${TEST_EXIT}"
-
-          echo "===== dev server 日志（测试后尾部 60 行）====="
-          tail -60 scripts/_ci_devserver.log || true
-
-          exit $TEST_EXIT
+        run: node scripts/test/ci-integration.mjs
 
       - name: 失败时上传服务日志
         if: failure()
