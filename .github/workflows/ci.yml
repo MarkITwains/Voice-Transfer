@@ -78,6 +78,12 @@ jobs:
       # E 组用例依赖验证码接口回传 debugCode；仅开发/QA 环境生效
       QA_TEST_MODE: "1"
       QA_BASE_URL: http://127.0.0.1:7200
+      # 关键：Actions runner 设置了 http_proxy/https_proxy，
+      # Node 的 fetch(undici) 会遵循它，导致访问本机 127.0.0.1:7200
+      # 的探活与测试请求被发往外部代理而失败。
+      # 必须让回环地址绕过代理。
+      no_proxy: 127.0.0.1,localhost,::1
+      NO_PROXY: 127.0.0.1,localhost,::1
 
     steps:
       - name: 检出代码

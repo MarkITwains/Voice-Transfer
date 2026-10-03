@@ -12,6 +12,7 @@
  * 退出码：0 全部通过；1 服务起不来或有用例失败。
  */
 import { spawn } from "node:child_process";
+import { get as httpGet } from "node:http";
 import path from "node:path";
 import fs from "node:fs";
 
@@ -20,6 +21,16 @@ const node = process.execPath;
 const PORT = process.env.QA_PORT || "7200";
 const BASE = `http://127.0.0.1:${PORT}`;
 const LOG = path.join(root, "scripts", "_ci_devserver.log");
+
+// 关键：CI runner 与部分开发机设置了 http_proxy/https_proxy，
+// Node 的 fetch(undici) 会遵循它，把发往本机 127.0.0.1 的请求也交给代理，
+// 造成探活与测试请求失败（表现为 dev server 明明起着却连不上）。
+// 这里显式清空代理变量，确保回环地址直连。
+for (const k of ["http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"]) {
+    delete process.env[k];
+}
+process.env.no_proxy = "127.0.0.1,localhost,::1";
+process.env.NO_PROXY = "127.0.0.1,localhost,::1";
 
 const logStream = fs.createWriteStream(LOG, { flags: "w" });
 
@@ -32,27 +43,51 @@ function log(msg) {
     selfStream.write(`${msg}\n`);
 }
 
+/** 用原生 http 探活（绕开 undici 对 http_proxy 的遵循） */
+function probeHealth() {
+    return new Promise((resolve) => {
+        const req = httpGet(
+            { host: "127.0.0.1", port: Number(PORT), path: "/api/health", timeout: 5000 },
+            (res) => {
+                res.resume();
+                resolve(res.statusCode === 200);
+            }
+        );
+        req.on("error", () => resolve(false));
+        req.on("timeout", () => {
+            req.destroy();
+            resolve(false);
+        });
+    });
+}
+
 /** 轮询 /api/health 直到就绪或超时 */
 async function waitReady(timeoutMs) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-        try {
-            const res = await fetch(`${BASE}/api/health`, { signal: AbortSignal.timeout(5000) });
-            if (res.ok) return true;
-        } catch {
-            /* 尚未就绪，继续等 */
-        }
+        if (await probeHealth()) return true;
         await new Promise((r) => setTimeout(r, 2000));
     }
     return false;
 }
 
-/** 运行一个子进程并返回退出码 */
+/** 运行一个子进程并返回退出码（显式传入清理过代理的 env） */
 function runProcess(cmd, args, opts = {}) {
     return new Promise((resolve) => {
-        const child = spawn(cmd, args, { cwd: root, stdio: "inherit", ...opts });
+        const child = spawn(cmd, args, { cwd: root, stdio: "inherit", env: cleanEnv(), ...opts });
         child.on("exit", (code) => resolve(code ?? 1));
     });
+}
+
+/** 返回清掉代理变量的环境副本（子进程发 fetch 时同样需要绕过代理） */
+function cleanEnv() {
+    const e = { ...process.env };
+    for (const k of ["http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"]) {
+        delete e[k];
+    }
+    e.no_proxy = "127.0.0.1,localhost,::1";
+    e.NO_PROXY = "127.0.0.1,localhost,::1";
+    return e;
 }
 
 // 1) 起 dev server（显式绑定 IPv4，避免 localhost→::1 的不一致）
@@ -67,7 +102,7 @@ if (!fs.existsSync(NEXT_BIN)) {
 const dev = spawn(
     node,
     [NEXT_BIN, "dev", "-H", "127.0.0.1", "-p", PORT],
-    { cwd: root, stdio: ["ignore", "pipe", "pipe"] }
+    { cwd: root, stdio: ["ignore", "pipe", "pipe"], env: cleanEnv() }
 );
 
 dev.stdout.pipe(logStream);
