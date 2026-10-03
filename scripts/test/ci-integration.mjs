@@ -23,8 +23,13 @@ const LOG = path.join(root, "scripts", "_ci_devserver.log");
 
 const logStream = fs.createWriteStream(LOG, { flags: "w" });
 
+// 自身诊断日志（同时写日志文件，便于 CI 失败时通过 artifact 取回）
+const SELF_LOG = path.join(root, "scripts", "_ci_integration.log");
+const selfStream = fs.createWriteStream(SELF_LOG, { flags: "w" });
+
 function log(msg) {
     process.stdout.write(`${msg}\n`);
+    selfStream.write(`${msg}\n`);
 }
 
 /** 轮询 /api/health 直到就绪或超时 */
@@ -51,12 +56,18 @@ function runProcess(cmd, args, opts = {}) {
 }
 
 // 1) 起 dev server（显式绑定 IPv4，避免 localhost→::1 的不一致）
-//    Windows 上 .cmd 需经 shell 才能 spawn，故统一用 npx + shell
+//    直接用 node 执行 next 的 bin 脚本：绕开 npx（CI 上会尝试访问 registry，
+//    既慢又可能在受限网络下失败），也绕开 npm 的信号转发损耗。
 log("===== 启动 dev server =====");
+const NEXT_BIN = path.join(root, "node_modules", "next", "dist", "bin", "next");
+if (!fs.existsSync(NEXT_BIN)) {
+    log(`::error::未找到 next 可执行文件：${NEXT_BIN}（请先 npm ci）`);
+    process.exit(1);
+}
 const dev = spawn(
-    "npx",
-    ["next", "dev", "-H", "127.0.0.1", "-p", PORT],
-    { cwd: root, stdio: ["ignore", "pipe", "pipe"], shell: process.platform === "win32" }
+    node,
+    [NEXT_BIN, "dev", "-H", "127.0.0.1", "-p", PORT],
+    { cwd: root, stdio: ["ignore", "pipe", "pipe"] }
 );
 
 dev.stdout.pipe(logStream);

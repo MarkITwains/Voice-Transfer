@@ -124,6 +124,8 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: dev-server-log
-          path: scripts/_ci_devserver.log
+          name: ci-diagnostics
+          path: |
+            scripts/_ci_devserver.log
+            scripts/_ci_integration.log
           if-no-files-found: ignore
