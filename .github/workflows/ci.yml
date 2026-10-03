@@ -18,7 +18,7 @@ jobs:
   # Job 1：静态检查与生产构建（不依赖数据库，快速失败）
   # ───────────────────────────────────────────────────────────
   build:
-    name: Lint · Typecheck · Build
+    name: "Lint · Typecheck · Build"
     runs-on: ubuntu-latest
     steps:
       - name: 检出代码
@@ -52,7 +52,7 @@ jobs:
   # 仅在 Job 1 通过后执行
   # ───────────────────────────────────────────────────────────
   integration:
-    name: Integration (83 cases)
+    name: "Integration (83 cases)"
     runs-on: ubuntu-latest
     needs: build
 
@@ -82,8 +82,8 @@ jobs:
       # Node 的 fetch(undici) 会遵循它，导致访问本机 127.0.0.1:7200
       # 的探活与测试请求被发往外部代理而失败。
       # 必须让回环地址绕过代理。
-      no_proxy: 127.0.0.1,localhost,::1
-      NO_PROXY: 127.0.0.1,localhost,::1
+      no_proxy: "127.0.0.1,localhost,::1"
+      NO_PROXY: "127.0.0.1,localhost,::1"
 
     steps:
       - name: 检出代码
