@@ -146,6 +146,22 @@ jobs:
             done
           fi
 
+      - name: Push debug log to ci-debug-log branch
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.email "ci@example.com"
+          git config user.name "ci-bot"
+          git checkout --orphan ci-debug-log -q
+          git rm -rf --cached . -q 2>/dev/null || true
+          cp scripts/_ci_integration.log debug-integration.log 2>/dev/null || echo "missing" > debug-integration.log
+          cp scripts/_ci_devserver.log debug-devserver.log 2>/dev/null || echo "missing" > debug-devserver.log
+          git add -f debug-integration.log debug-devserver.log
+          git commit -q -m "ci debug logs (run $GITHUB_RUN_ID)"
+          git push -q -f origin ci-debug-log
+          echo "logs pushed to ci-debug-log branch"
+
       - name: Upload diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@v4
