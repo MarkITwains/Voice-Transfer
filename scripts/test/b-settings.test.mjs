@@ -6,8 +6,9 @@
  */
 import assert from "node:assert/strict";
 import {
-    httpGet, httpPut, httpPost, dbQuery, closePool,
+    httpGet, httpPut, httpPost, httpDelete, dbQuery, closePool,
     testCase, summary, registerOrLogin, setForwardedIp,
+    startMockLlm, createMeetingViaSummarize,
 } from "./helpers.mjs";
 
 let originalModel = null;
@@ -110,21 +111,32 @@ try {
 
     // ---------- B5 chat 从 DB 拿配置 ----------
     await testCase("B5 /api/chat(带 roomId) 能从 DB 取配置发起请求（非「未配置密钥」）", async () => {
-        const list = await httpGet("/api/meetings");
-        const roomId = list.body?.meetings?.[0]?.id;
-        assert.ok(roomId, "无可用 roomId");
-        const res = await httpPost("/api/chat", { roomId, question: "这场会议的主要结论是什么？" });
-        console.log(`      chat 响应: status=${res.status} body=${res.text.slice(0, 200)}`);
-        // 不能因为「未配置密钥」而 401 —— DB 中有测试密钥，配置解析必须成功
-        const notConfigured = typeof res.body?.error === "string" && res.body.error.includes("未配置");
-        assert.ok(!notConfigured, `chat 返回「未配置密钥」类错误，DB 配置读取链路失败: ${res.body?.error}`);
-        assert.ok([200, 401, 500].includes(res.status), `chat 状态异常: ${res.status}`);
-        if (res.status === 500) {
-            // 500 必须来自上游 LLM 调用失败（假密钥预期），而不是配置/DB 崩溃
-            assert.ok(
-                !/relation|doesn'?t exist|Unknown column|ECONNREFUSED|Access denied|ER_/i.test(String(res.body?.error)),
-                `疑似 DB/配置错误: ${res.body?.error}`
-            );
+        // 自建临时会议：CI 为全新空库，qaadmin 名下未必有存量会议可挑
+        const MOCK_PORT = 7301; // 避开 A 组用的 7300
+        const mockServer = await startMockLlm(MOCK_PORT);
+        let roomId = null;
+        try {
+            roomId = await createMeetingViaSummarize(MOCK_PORT);
+            const res = await httpPost("/api/chat", { roomId, question: "这场会议的主要结论是什么？" });
+            console.log(`      chat 响应: status=${res.status} body=${res.text.slice(0, 200)}`);
+            // 不能因为「未配置密钥」而 401 —— DB 中有测试密钥，配置解析必须成功
+            const notConfigured = typeof res.body?.error === "string" && res.body.error.includes("未配置");
+            assert.ok(!notConfigured, `chat 返回「未配置密钥」类错误，DB 配置读取链路失败: ${res.body?.error}`);
+            assert.ok([200, 401, 500].includes(res.status), `chat 状态异常: ${res.status}`);
+            if (res.status === 500) {
+                // 500 必须来自上游 LLM 调用失败（假密钥预期），而不是配置/DB 崩溃
+                assert.ok(
+                    !/relation|doesn'?t exist|Unknown column|ECONNREFUSED|Access denied|ER_/i.test(String(res.body?.error)),
+                    `疑似 DB/配置错误: ${res.body?.error}`
+                );
+            }
+        } finally {
+            // 清理临时会议与 mock server，不在库里留测试数据
+            if (roomId) {
+                const del = await httpDelete(`/api/meetings?id=${encodeURIComponent(roomId)}`);
+                console.log(`      清理临时会议 ${roomId}: ${del.status === 200 || del.status === 404 ? "OK" : `status=${del.status}`}`);
+            }
+            mockServer?.close?.();
         }
     });
 } finally {

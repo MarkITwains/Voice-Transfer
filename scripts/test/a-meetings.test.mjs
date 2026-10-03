@@ -34,7 +34,8 @@ try {
         assert.equal(res.body?.success, true, "success 字段应为 true");
         const list = res.body?.meetings;
         assert.ok(Array.isArray(list), "meetings 应为数组");
-        assert.ok(list.length >= 4, `存量会议应 >= 4 条，实际 ${list.length}`);
+        // 注：不断言具体条数 —— CI 为全新空库，本机才有存量会议；
+        // 「新建后可查」的条数保证由 A2 用例覆盖。
         for (const m of list) {
             for (const key of ["id", "title", "createdAt"]) {
                 assert.ok(m[key] !== undefined && m[key] !== null && m[key] !== "", `条目缺字段 ${key}`);
