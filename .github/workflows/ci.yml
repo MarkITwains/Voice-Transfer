@@ -1,6 +1,5 @@
 name: CI
 
-# 触发：推送到 master，以及针对 master 的 PR
 on:
   push:
     branches: [master]
@@ -8,51 +7,41 @@ on:
     branches: [master]
   workflow_dispatch:
 
-# 同一分支的重复触发自动取消上一次未完成的运行
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # ───────────────────────────────────────────────────────────
-  # Job 1：静态检查与生产构建（不依赖数据库，快速失败）
-  # ───────────────────────────────────────────────────────────
   build:
-    name: "Lint · Typecheck · Build"
+    name: Lint / Typecheck / Build
     runs-on: ubuntu-latest
     steps:
-      - name: 检出代码
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: 安装 Node.js
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
 
-      - name: 安装依赖
+      - name: Install dependencies
         run: npm ci
 
-      - name: 类型检查
+      - name: Typecheck
         run: npx tsc --noEmit
 
-      - name: ESLint
+      - name: Lint
         run: npm run lint
 
-      - name: 生产构建
+      - name: Build
         env:
-          # ensureDatabase() 为 lazy 执行，构建期不连库；
-          # 此处提供占位连接串，避免任何预渲染路径意外触碰连接池。
           DATABASE_URL: mysql://ci:ci@127.0.0.1:3306/meeting_ai
           AUTH_SECRET: ci-build-placeholder-secret
         run: npm run build
 
-  # ───────────────────────────────────────────────────────────
-  # Job 2：集成回归（真实 MySQL + 真实 dev 服务，跑全部 83 个用例）
-  # 仅在 Job 1 通过后执行
-  # ───────────────────────────────────────────────────────────
   integration:
-    name: "Integration (83 cases)"
+    name: Integration
     runs-on: ubuntu-latest
     needs: build
 
@@ -75,30 +64,25 @@ jobs:
     env:
       DATABASE_URL: mysql://transfer:ci_password@127.0.0.1:3306/meeting_ai
       AUTH_SECRET: ci-integration-secret-key
-      # E 组用例依赖验证码接口回传 debugCode；仅开发/QA 环境生效
       QA_TEST_MODE: "1"
       QA_BASE_URL: http://127.0.0.1:7200
-      # 关键：Actions runner 设置了 http_proxy/https_proxy，
-      # Node 的 fetch(undici) 会遵循它，导致访问本机 127.0.0.1:7200
-      # 的探活与测试请求被发往外部代理而失败。
-      # 必须让回环地址绕过代理。
       no_proxy: "127.0.0.1,localhost,::1"
       NO_PROXY: "127.0.0.1,localhost,::1"
 
     steps:
-      - name: 检出代码
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: 安装 Node.js
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
 
-      - name: 安装依赖
+      - name: Install dependencies
         run: npm ci
 
-      - name: 生成 .env.local
+      - name: Create .env.local
         run: |
           cat > .env.local <<'EOF'
           DATABASE_URL=mysql://transfer:ci_password@127.0.0.1:3306/meeting_ai
@@ -107,26 +91,26 @@ jobs:
           QA_BASE_URL=http://127.0.0.1:7200
           EOF
 
-      - name: 建库并验证连通
+      - name: Create database
         run: node scripts/db/create-mysql-database.mjs
 
-      - name: 等待 MySQL 就绪
+      - name: Wait for MySQL
         run: |
           for i in $(seq 1 30); do
             if mysqladmin ping -h127.0.0.1 -P3306 -utransfer -pci_password --silent 2>/dev/null; then
-              echo "MySQL 已就绪"; exit 0
+              echo "MySQL ready"
+              exit 0
             fi
-            echo "等待 MySQL... ($i/30)"; sleep 2
+            echo "waiting mysql ($i/30)"
+            sleep 2
           done
-          echo "MySQL 启动超时"; exit 1
+          echo "MySQL timeout"
+          exit 1
 
-      # 注意：GitHub Actions 每个 step 是独立 shell，后台进程不会跨 step 存活。
-      # 故用单个 Node 脚本在**同一进程内**完成「起服务 → 等就绪 → 跑测试 → 回收」，
-      # 既跨平台可靠，也可在本地以同一命令复现。
-      - name: 启动开发服务并执行回归测试
+      - name: Run integration tests
         run: node scripts/test/ci-integration.mjs
 
-      - name: 失败时上传服务日志
+      - name: Upload diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
