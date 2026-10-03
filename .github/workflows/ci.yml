@@ -106,8 +106,31 @@ jobs:
           echo "MySQL timeout"
           exit 1
 
+      - name: Debug environment
+        run: |
+          echo "node: $(node -v)"
+          echo "pwd: $(pwd)"
+          echo "next bin exists: $(test -f node_modules/next/dist/bin/next && echo yes || echo no)"
+          echo "env.local exists: $(test -f .env.local && echo yes || echo no)"
+          echo "env.local content:"
+          cat .env.local
+          echo "proxy env:"
+          env | grep -i proxy || echo "(none)"
+          echo "port 7200 before start:"
+          (ss -ltnp 2>/dev/null | grep 7200 || echo "(free)")
+
       - name: Run integration tests
         run: node scripts/test/ci-integration.mjs
+
+      - name: Show integration diagnostics
+        if: always()
+        run: |
+          echo "===== _ci_integration.log ====="
+          cat scripts/_ci_integration.log 2>/dev/null || echo "(missing)"
+          echo "===== _ci_devserver.log ====="
+          cat scripts/_ci_devserver.log 2>/dev/null || echo "(missing)"
+          echo "===== port 7200 after ====="
+          (ss -ltnp 2>/dev/null | grep 7200 || echo "(not listening)")
 
       - name: Upload diagnostics on failure
         if: failure()
