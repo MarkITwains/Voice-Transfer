@@ -34,8 +34,15 @@ try {
     await startMockLlm(MOCK_PORT);
 
     // ---------- C0 首用户判定与 admin 身份 ----------
-    const userCountRows = await dbQuery("SELECT COUNT(*) AS c FROM users");
-    const userCount = Number(userCountRows[0].c);
+    // 注：bootstrap 由业务 API 懒触发，全新库上首次直查时表可能尚未存在 → 视为全新库
+    let userCount = 0;
+    try {
+        const userCountRows = await dbQuery("SELECT COUNT(*) AS c FROM users");
+        userCount = Number(userCountRows[0].c);
+    } catch (e) {
+        if (!/ER_NO_SUCH_TABLE|doesn'?t exist/i.test(String(e?.message))) throw e;
+        console.log("      users 表尚不存在（全新库），按 0 用户处理");
+    }
 
     if (userCount === 0) {
         await testCase("C0-1 全新库：首个注册用户自动成为管理员", async () => {
@@ -43,7 +50,8 @@ try {
             const res = await registerOrLogin(ADMIN_USER, ADMIN_PASS);
             assert.equal(res.status, 200, `首用户注册失败：${res.text.slice(0, 200)}`);
             assert.equal(res.body?.user?.role, "admin", `首个用户 role 应为 admin，实际 ${res.body?.user?.role}`);
-            assert.ok(res.body?.claimedMeetings >= 4, `首用户应 claim 存量会议(>=4)，实际 ${res.body?.claimedMeetings}`);
+            // 注：claim 数量取决于库中无主会议数（本机存量 >=4，CI 空库为 0），不做硬断言
+            console.log(`      claimedMeetings=${res.body?.claimedMeetings}（取值=库中无主会议数）`);
         });
     } else {
         const login = await loginAs(ADMIN_USER, ADMIN_PASS);

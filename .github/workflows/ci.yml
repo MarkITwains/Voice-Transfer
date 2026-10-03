@@ -65,7 +65,8 @@ jobs:
 
     env:
       DATABASE_URL: mysql://transfer:ci_password@127.0.0.1:3306/meeting_ai
-      AUTH_SECRET: ci-integration-secret-key
+      # 注意：不注入 AUTH_SECRET —— 让 dev server 首次启动时自动生成 64 字节
+      # 随机密钥并落盘 data/auth_secret，d-auth-deep 组需要读取该文件
       QA_TEST_MODE: "1"
       QA_BASE_URL: http://127.0.0.1:7200
       no_proxy: "127.0.0.1,localhost,::1"
@@ -87,7 +88,6 @@ jobs:
         run: |
           cat > .env.local <<'EOF'
           DATABASE_URL=mysql://transfer:ci_password@127.0.0.1:3306/meeting_ai
-          AUTH_SECRET=ci-integration-secret-key
           QA_TEST_MODE=1
           QA_BASE_URL=http://127.0.0.1:7200
           EOF
